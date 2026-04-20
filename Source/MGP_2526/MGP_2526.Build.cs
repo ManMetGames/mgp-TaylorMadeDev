@@ -18,11 +18,11 @@ public class MGP_2526 : ModuleRules
 			"StateTreeModule",
 			"GameplayStateTreeModule",
 			"UMG",
+			"Paper2D",
 			"Slate"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
-
 		PublicIncludePaths.AddRange(new string[] {
 			"MGP_2526",
 			"MGP_2526/Variant_Platforming",
