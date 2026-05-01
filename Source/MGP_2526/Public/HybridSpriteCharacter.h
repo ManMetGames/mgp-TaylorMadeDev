@@ -151,6 +151,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera")
 	float ZoomInterpSpeed = 8.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Bob")
+	bool bEnableCameraBob = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Bob")
+	float CameraBobSpeed = 22.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Bob")
+	float CameraBobAmount = 1.5f;
+
+	float CameraBobTime = 0.0f;
+	FVector InitialSocketOffset;
+
 protected:
 	void Move(const FInputActionValue& Value);
 	void LookX(const FInputActionValue& Value);

@@ -107,6 +107,11 @@ void AHybridSpriteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (SpringArm)
+	{
+		InitialSocketOffset = SpringArm->SocketOffset;
+	}
+
 	if (!Sprite || !Sprite->GetFlipbook())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("HybridSpriteCharacter: Sprite component has no flipbook assigned at BeginPlay."));
@@ -236,6 +241,31 @@ void AHybridSpriteCharacter::UpdateCamera(float DeltaTime)
 		DeltaTime,
 		ZoomInterpSpeed
 	);
+
+	if (bEnableCameraBob && GetCharacterMovement())
+	{
+		FVector Velocity = GetVelocity();
+		Velocity.Z = 0.0f;
+		float Speed = Velocity.Size();
+		float MaxSpeed = GetCharacterMovement()->MaxWalkSpeed > 0.0f ? GetCharacterMovement()->MaxWalkSpeed : 400.0f;
+
+		if (Speed > KINDA_SMALL_NUMBER && GetCharacterMovement()->IsMovingOnGround())
+		{
+			CameraBobTime += DeltaTime * CameraBobSpeed * (Speed / MaxSpeed);
+			float BobOffset = FMath::Sin(CameraBobTime) * CameraBobAmount;
+			SpringArm->SocketOffset = InitialSocketOffset + FVector(0.0f, 0.0f, BobOffset);
+		}
+		else
+		{
+			CameraBobTime = 0.0f;
+			SpringArm->SocketOffset = FMath::VInterpTo(
+				SpringArm->SocketOffset, 
+				InitialSocketOffset, 
+				DeltaTime, 
+				15.0f
+			);
+		}
+	}
 }
 
 void AHybridSpriteCharacter::UpdateAnimation()
