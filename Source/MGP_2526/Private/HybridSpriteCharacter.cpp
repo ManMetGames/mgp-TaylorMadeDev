@@ -169,11 +169,22 @@ void AHybridSpriteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 		{
 			EnhancedInput->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AHybridSpriteCharacter::Zoom);
 		}
+
+		if (AttackAction)
+		{
+			EnhancedInput->BindAction(AttackAction, ETriggerEvent::Started, this, &AHybridSpriteCharacter::StartAttack);
+		}
 	}
 }
 
 void AHybridSpriteCharacter::Move(const FInputActionValue& Value)
 {
+	if (!CanAttack()) 
+	{
+		// Cannot move while attacking, parrying, etc.
+		return;
+	}
+
 	const FVector2D MoveInput = Value.Get<FVector2D>();
 	LastMoveInputX = MoveInput.X;
 	LastMoveInputY = MoveInput.Y;
@@ -430,5 +441,109 @@ void AHybridSpriteCharacter::SetFlipbookForState(bool bIsMoving, EHybridSpriteDi
 	else if (!Sprite->IsPlaying())
 	{
 		Sprite->Play();
+	}
+}
+
+// -------------------------------------------------------------------------
+// Combat State Machine & Attack Mechanics
+// -------------------------------------------------------------------------
+
+void AHybridSpriteCharacter::SetCombatState(ECombatState NewState)
+{
+	CombatState = NewState;
+}
+
+bool AHybridSpriteCharacter::IsInState(ECombatState StateToCheck) const
+{
+	return CombatState == StateToCheck;
+}
+
+bool AHybridSpriteCharacter::CanAttack() const
+{
+	return (CombatState == ECombatState::Idle || CombatState == ECombatState::Moving);
+}
+
+void AHybridSpriteCharacter::StartAttack()
+{
+	// Prevent attacking if we are already doing something else OR if we have no weapon
+	if (!CanAttack() || !IsWeaponEquipped()) return;
+
+	SetCombatState(ECombatState::Attacking);
+	
+	// Print to screen to prove we are attacking
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, TEXT("Attack Windup..."));
+	}
+
+	// Step 1: Wait for windup to finish, then activate hitbox
+	GetWorldTimerManager().SetTimer(
+		AttackWindupTimerHandle,
+		this,
+		&AHybridSpriteCharacter::BeginAttackActiveFrames,
+		AttackWindupTime,
+		false
+	);
+}
+
+void AHybridSpriteCharacter::BeginAttackActiveFrames()
+{
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("Attack ACTIVE! Hitbox is lethal."));
+	}
+
+	// Make the trace or hitbox active here (will do this next time)
+
+	// Step 2: Wait for active frames to end
+	GetWorldTimerManager().SetTimer(
+		AttackActiveTimerHandle,
+		this,
+		&AHybridSpriteCharacter::EndAttackActiveFrames,
+		AttackActiveTime,
+		false
+	);
+}
+
+void AHybridSpriteCharacter::EndAttackActiveFrames()
+{
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Orange, TEXT("Attack Recovery..."));
+	}
+
+	// Disable the trace or hitbox here
+
+	// Step 3: Wait for recovery to end
+	GetWorldTimerManager().SetTimer(
+		AttackRecoveryTimerHandle,
+		this,
+		&AHybridSpriteCharacter::FinishAttack,
+		AttackRecoveryTime,
+		false
+	);
+}
+
+void AHybridSpriteCharacter::FinishAttack()
+{
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, TEXT("Attack finished, back to Idle."));
+	}
+
+	// Reset state based on whether we are currently moving or not
+	if (GetVelocity().SizeSquared() > 0)
+	{
+		SetCombatState(ECombatState::Moving);
+	}
+	else
+	{
+		SetCombatState(ECombatState::Idle);
 	}
 }

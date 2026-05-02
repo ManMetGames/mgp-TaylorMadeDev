@@ -23,6 +23,19 @@ enum class EHybridSpriteDirection : uint8
 	Up
 };
 
+UENUM(BlueprintType)
+enum class ECombatState : uint8
+{
+	Idle		UMETA(DisplayName = "Idle"),
+	Moving		UMETA(DisplayName = "Moving"),
+	Attacking	UMETA(DisplayName = "Attacking"),
+	Blocking	UMETA(DisplayName = "Blocking"),
+	Parrying	UMETA(DisplayName = "Parrying"),
+	HitReact	UMETA(DisplayName = "Hit React"),
+	Stunned		UMETA(DisplayName = "Stunned"),
+	Dead		UMETA(DisplayName = "Dead")
+};
+
 UCLASS()
 class MGP_2526_API AHybridSpriteCharacter : public ACharacter
 {
@@ -63,6 +76,15 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* ZoomAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* AttackAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* BlockAction;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* ParryAction;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	UPaperFlipbook* IdleDownFlipbook;
@@ -172,4 +194,56 @@ protected:
 	void UpdateCamera(float DeltaTime);
 	void UpdateAnimation();
 	void SetFlipbookForState(bool bIsMoving, EHybridSpriteDirection Direction);
+
+public:
+	// -------------------------
+	// Combat State
+	// -------------------------
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|State")
+	ECombatState CombatState = ECombatState::Idle;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	void SetCombatState(ECombatState NewState);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	bool IsInState(ECombatState StateToCheck) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	bool CanAttack() const;
+
+	UFUNCTION(BlueprintImplementableEvent, BlueprintCallable, Category = "Combat|State")
+	bool IsWeaponEquipped() const;
+
+	// -------------------------
+	// Attack Mechanics
+	// -------------------------
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackDamage = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackWindupTime = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackActiveTime = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackRecoveryTime = 0.3f;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void StartAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void BeginAttackActiveFrames();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void EndAttackActiveFrames();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void FinishAttack();
+
+protected:
+	FTimerHandle AttackWindupTimerHandle;
+	FTimerHandle AttackActiveTimerHandle;
+	FTimerHandle AttackRecoveryTimerHandle;
+
 };
