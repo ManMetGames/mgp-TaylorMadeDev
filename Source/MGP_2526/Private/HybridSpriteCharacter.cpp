@@ -14,6 +14,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "PaperFlipbook.h"
 #include "PaperFlipbookComponent.h"
+#include "PaperSpriteComponent.h"
 #include "UObject/ConstructorHelpers.h"
 
 AHybridSpriteCharacter::AHybridSpriteCharacter()
@@ -46,6 +47,14 @@ AHybridSpriteCharacter::AHybridSpriteCharacter()
 	Sprite->SetHiddenInGame(false);
 	Sprite->SetLooping(true);
 	Sprite->SetPlayRate(1.0f);
+
+	AttackSlashSprite = CreateDefaultSubobject<UPaperSpriteComponent>(TEXT("AttackSlashSprite"));
+	AttackSlashSprite->SetupAttachment(VisualRoot);
+	AttackSlashSprite->bEditableWhenInherited = true;
+	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, AttackSlashOffsetZ));
+	AttackSlashSprite->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
+	AttackSlashSprite->SetVisibility(false);
+	AttackSlashSprite->SetHiddenInGame(true);
 
 	static ConstructorHelpers::FObjectFinder<UPaperFlipbook> IdleDownAsset(TEXT("/Game/PaperAssets/FlipBooks/Move/Idle_Down.Idle_Down"));
 	static ConstructorHelpers::FObjectFinder<UPaperFlipbook> IdleSideAsset(TEXT("/Game/PaperAssets/FlipBooks/Move/Idle_Side.Idle_Side"));
@@ -141,6 +150,7 @@ void AHybridSpriteCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	UpdateCamera(DeltaTime);
+	UpdateAttackArc(DeltaTime);
 	UpdateAnimation();
 }
 
@@ -465,18 +475,28 @@ bool AHybridSpriteCharacter::CanAttack() const
 
 void AHybridSpriteCharacter::StartAttack()
 {
-	// Prevent attacking if we are already doing something else OR if we have no weapon
-	if (!CanAttack() || !IsWeaponEquipped()) return;
+	if (!CanAttack() || !IsWeaponEquipped())
+	{
+		if (GEngine)
+		{
+			const FString Reason = !CanAttack()
+				? TEXT("Attack blocked: combat state does not allow attacking")
+				: TEXT("Attack blocked: no weapon equipped");
+			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, Reason);
+		}
+
+		return;
+	}
 
 	SetCombatState(ECombatState::Attacking);
-	
-	// Print to screen to prove we are attacking
+
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, TEXT("Attack Windup..."));
 	}
 
-	// Step 1: Wait for windup to finish, then activate hitbox
+	ShowAttackArc();
+
 	GetWorldTimerManager().SetTimer(
 		AttackWindupTimerHandle,
 		this,
@@ -488,16 +508,16 @@ void AHybridSpriteCharacter::StartAttack()
 
 void AHybridSpriteCharacter::BeginAttackActiveFrames()
 {
-	if (!IsInState(ECombatState::Attacking)) return;
+	if (!IsInState(ECombatState::Attacking))
+	{
+		return;
+	}
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("Attack ACTIVE! Hitbox is lethal."));
 	}
 
-	// Make the trace or hitbox active here (will do this next time)
-
-	// Step 2: Wait for active frames to end
 	GetWorldTimerManager().SetTimer(
 		AttackActiveTimerHandle,
 		this,
@@ -509,16 +529,16 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 
 void AHybridSpriteCharacter::EndAttackActiveFrames()
 {
-	if (!IsInState(ECombatState::Attacking)) return;
+	if (!IsInState(ECombatState::Attacking))
+	{
+		return;
+	}
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Orange, TEXT("Attack Recovery..."));
 	}
 
-	// Disable the trace or hitbox here
-
-	// Step 3: Wait for recovery to end
 	GetWorldTimerManager().SetTimer(
 		AttackRecoveryTimerHandle,
 		this,
@@ -530,14 +550,18 @@ void AHybridSpriteCharacter::EndAttackActiveFrames()
 
 void AHybridSpriteCharacter::FinishAttack()
 {
-	if (!IsInState(ECombatState::Attacking)) return;
+	if (!IsInState(ECombatState::Attacking))
+	{
+		return;
+	}
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, TEXT("Attack finished, back to Idle."));
 	}
 
-	// Reset state based on whether we are currently moving or not
+	HideAttackArc();
+
 	if (GetVelocity().SizeSquared() > 0)
 	{
 		SetCombatState(ECombatState::Moving);
@@ -545,5 +569,60 @@ void AHybridSpriteCharacter::FinishAttack()
 	else
 	{
 		SetCombatState(ECombatState::Idle);
+	}
+}
+
+void AHybridSpriteCharacter::ShowAttackArc()
+{
+	AttackArcElapsed = 0.0f;
+	bAttackSlashVisible = true;
+
+	if (!AttackSlashSprite)
+	{
+		return;
+	}
+
+	AttackSlashSprite->SetVisibility(true);
+	AttackSlashSprite->SetHiddenInGame(false);
+	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
+	AttackSlashSprite->SetRelativeScale3D(FVector(SwordScale, SwordScale, SwordScale));
+
+	if (SwordSprite)
+	{
+		AttackSlashSprite->SetSprite(SwordSprite);
+	}
+}
+
+void AHybridSpriteCharacter::HideAttackArc()
+{
+	bAttackSlashVisible = false;
+
+	if (!AttackSlashSprite)
+	{
+		return;
+	}
+
+	AttackSlashSprite->SetVisibility(false);
+	AttackSlashSprite->SetHiddenInGame(true);
+}
+
+void AHybridSpriteCharacter::UpdateAttackArc(float DeltaTime)
+{
+	if (!bAttackSlashVisible || !AttackSlashSprite)
+	{
+		return;
+	}
+
+	AttackArcElapsed += DeltaTime;
+	const float NormalizedTime = FMath::Clamp(AttackArcElapsed / FMath::Max(SwordSwingDuration, 0.01f), 0.0f, 1.0f);
+	const float SwingAngle = FMath::Lerp(SwordSwingStartAngle, SwordSwingEndAngle, NormalizedTime);
+
+	// Rotate sword like a clock hand around player center
+	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
+	AttackSlashSprite->SetRelativeRotation(FRotator(0.0f, 0.0f, SwingAngle));
+
+	if (NormalizedTime >= 1.0f)
+	{
+		HideAttackArc();
 	}
 }

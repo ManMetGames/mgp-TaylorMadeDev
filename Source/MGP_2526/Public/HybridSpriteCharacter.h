@@ -10,6 +10,8 @@
 class USpringArmComponent;
 class UCameraComponent;
 class UPaperFlipbookComponent;
+class UPaperSpriteComponent;
+class UPaperSprite;
 class USceneComponent;
 class UInputMappingContext;
 class UInputAction;
@@ -55,6 +57,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UPaperFlipbookComponent* Sprite;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UPaperSpriteComponent* AttackSlashSprite;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USpringArmComponent* SpringArm;
@@ -229,6 +234,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
 	float AttackRecoveryTime = 0.3f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SwordSwingStartAngle = -90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SwordSwingEndAngle = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SwordSwingDuration = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SwordScale = 2.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	class UPaperSprite* SwordSprite;
+
 	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
 	void StartAttack();
 
@@ -245,5 +265,19 @@ protected:
 	FTimerHandle AttackWindupTimerHandle;
 	FTimerHandle AttackActiveTimerHandle;
 	FTimerHandle AttackRecoveryTimerHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Attack")
+	bool bAttackSlashVisible = false;
+
+	float AttackArcElapsed = 0.0f;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void UpdateAttackArc(float DeltaTime);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void ShowAttackArc();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void HideAttackArc();
 
 };
