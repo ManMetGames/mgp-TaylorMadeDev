@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SceneComponent.h"
+#include "Components/BoxComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -14,8 +15,13 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "PaperFlipbook.h"
 #include "PaperFlipbookComponent.h"
+#include "PaperSprite.h"
 #include "PaperSpriteComponent.h"
+#include "Components/WidgetComponent.h"
+#include "HealthBarWidget.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetMathLibrary.h"
 
 AHybridSpriteCharacter::AHybridSpriteCharacter()
 {
@@ -48,13 +54,29 @@ AHybridSpriteCharacter::AHybridSpriteCharacter()
 	Sprite->SetLooping(true);
 	Sprite->SetPlayRate(1.0f);
 
-	AttackSlashSprite = CreateDefaultSubobject<UPaperSpriteComponent>(TEXT("AttackSlashSprite"));
-	AttackSlashSprite->SetupAttachment(VisualRoot);
-	AttackSlashSprite->bEditableWhenInherited = true;
-	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, AttackSlashOffsetZ));
-	AttackSlashSprite->SetRelativeRotation(FRotator(90.0f, 0.0f, 0.0f));
-	AttackSlashSprite->SetVisibility(false);
-	AttackSlashSprite->SetHiddenInGame(true);
+	WeaponSlashSprite = CreateDefaultSubobject<UPaperSpriteComponent>(TEXT("WeaponSlashSprite"));
+	WeaponSlashSprite->SetupAttachment(VisualRoot);
+	WeaponSlashSprite->SetRelativeLocation(FVector(SlashForwardOffset, 0.0f, 0.0f));
+	WeaponSlashSprite->SetRelativeRotation(FRotator(0.0f, -55.0f, 0.0f));
+	WeaponSlashSprite->SetHiddenInGame(true);
+	WeaponSlashSprite->SetVisibility(false);
+	WeaponSlashSprite->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	WeaponSlashHitbox = CreateDefaultSubobject<UBoxComponent>(TEXT("WeaponSlashHitbox"));
+	WeaponSlashHitbox->SetupAttachment(WeaponSlashSprite);
+	WeaponSlashHitbox->SetBoxExtent(FVector(18.0f, SlashSweepWidth * 0.5f, 22.0f));
+	WeaponSlashHitbox->SetRelativeLocation(FVector(20.0f, 0.0f, 0.0f));
+	WeaponSlashHitbox->SetHiddenInGame(true);
+	WeaponSlashHitbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	WeaponSlashHitbox->SetCollisionObjectType(ECC_WorldDynamic);
+	WeaponSlashHitbox->SetCollisionResponseToAllChannels(ECR_Ignore);
+	WeaponSlashHitbox->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+
+	HealthBarWidget = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthBarWidget"));
+	HealthBarWidget->SetupAttachment(RootComponent);
+	HealthBarWidget->SetWidgetSpace(EWidgetSpace::Screen);
+	HealthBarWidget->SetRelativeLocation(FVector(0.0f, 0.0f, 100.0f));
+	HealthBarWidget->SetDrawSize(FVector2D(100.0f, 20.0f));
 
 	static ConstructorHelpers::FObjectFinder<UPaperFlipbook> IdleDownAsset(TEXT("/Game/PaperAssets/FlipBooks/Move/Idle_Down.Idle_Down"));
 	static ConstructorHelpers::FObjectFinder<UPaperFlipbook> IdleSideAsset(TEXT("/Game/PaperAssets/FlipBooks/Move/Idle_Side.Idle_Side"));
@@ -116,6 +138,11 @@ void AHybridSpriteCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	if (WeaponSlashHitbox)
+	{
+		WeaponSlashHitbox->OnComponentBeginOverlap.AddDynamic(this, &AHybridSpriteCharacter::OnAttackHitboxOverlap);
+	}
+
 	if (SpringArm)
 	{
 		InitialSocketOffset = SpringArm->SocketOffset;
@@ -150,7 +177,7 @@ void AHybridSpriteCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	UpdateCamera(DeltaTime);
-	UpdateAttackArc(DeltaTime);
+	UpdateAttackSwing(DeltaTime);
 	UpdateAnimation();
 }
 
@@ -164,6 +191,20 @@ void AHybridSpriteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 		{
 			EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &AHybridSpriteCharacter::Move);
 		}
+	if (HealthBarWidget)
+	{
+		// Ensure the widget instance exists before trying to access it.
+		HealthBarWidget->InitWidget();
+
+		if (UHealthBarWidget* HealthWidget = Cast<UHealthBarWidget>(HealthBarWidget->GetUserWidgetObject()))
+		{
+			HealthWidget->SetSourceCharacter(this);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("HybridSpriteCharacter: HealthBarWidget exists but could not be cast to UHealthBarWidget at BeginPlay."));
+		}
+	}
 
 		if (LookXAction)
 		{
@@ -184,14 +225,24 @@ void AHybridSpriteCharacter::SetupPlayerInputComponent(UInputComponent* PlayerIn
 		{
 			EnhancedInput->BindAction(AttackAction, ETriggerEvent::Started, this, &AHybridSpriteCharacter::StartAttack);
 		}
+
+		if (BlockAction)
+		{
+			EnhancedInput->BindAction(BlockAction, ETriggerEvent::Started, this, &AHybridSpriteCharacter::StartBlock);
+			EnhancedInput->BindAction(BlockAction, ETriggerEvent::Completed, this, &AHybridSpriteCharacter::EndBlock);
+		}
+
+		if (LockOnAction)
+		{
+			EnhancedInput->BindAction(LockOnAction, ETriggerEvent::Started, this, &AHybridSpriteCharacter::ToggleTargetLock);
+		}
 	}
 }
 
 void AHybridSpriteCharacter::Move(const FInputActionValue& Value)
 {
-	if (!CanAttack()) 
+	if (!CanMove())
 	{
-		// Cannot move while attacking, parrying, etc.
 		return;
 	}
 
@@ -248,6 +299,13 @@ void AHybridSpriteCharacter::UpdateCamera(float DeltaTime)
 		return;
 	}
 
+	// Target Lock overrides the normal camera yaw smoothly
+	if (IsValid(LockedTarget))
+	{
+		FRotator LookAtRot = UKismetMathLibrary::FindLookAtRotation(GetActorLocation(), LockedTarget->GetActorLocation());
+		CameraYaw = FMath::FInterpTo(CameraYaw, LookAtRot.Yaw, DeltaTime, 10.0f);
+	}
+
 	const FRotator TargetRotation(CameraPitch, CameraYaw, 0.0f);
 	SpringArm->SetRelativeRotation(TargetRotation);
 
@@ -289,9 +347,48 @@ void AHybridSpriteCharacter::UpdateCamera(float DeltaTime)
 	}
 }
 
+void AHybridSpriteCharacter::UpdateAttackSwing(float DeltaTime)
+{
+	// If we are not actively swinging, hide the sprite and do nothing
+	if (!bAttackSwingActive || !WeaponSlashSprite)
+	{
+		if (WeaponSlashSprite && !WeaponSlashSprite->bHiddenInGame)
+		{
+			WeaponSlashSprite->SetHiddenInGame(true);
+			WeaponSlashSprite->SetVisibility(false, true);
+		}
+		return;
+	}
+
+	// Turn the sprite on
+	WeaponSlashSprite->SetHiddenInGame(false);
+	WeaponSlashSprite->SetVisibility(true, true);
+
+	AttackSwingElapsed += DeltaTime;
+	
+	// Create a sweeping motion from left to right (-55 degrees to +55 degrees)
+	float SwingProgress = FMath::Clamp(AttackSwingElapsed / AttackActiveTime, 0.0f, 1.0f);
+	
+	// Make it arc around the player
+	float StartAngle = -55.0f;
+	float EndAngle = 55.0f;
+	float CurrentAngle = FMath::Lerp(StartAngle, EndAngle, SwingProgress);
+
+	FRotator SwingRotation(0.0f, CurrentAngle, 0.0f);
+	WeaponSlashSprite->SetRelativeRotation(SwingRotation);
+
+	FVector ForwardOffset(SlashForwardOffset, 0.0f, 0.0f);
+	WeaponSlashSprite->SetRelativeLocation(ForwardOffset);
+}
+
 void AHybridSpriteCharacter::UpdateAnimation()
 {
 	if (!Sprite)
+	{
+		return;
+	}
+
+	if (!CanMove())
 	{
 		return;
 	}
@@ -311,7 +408,9 @@ void AHybridSpriteCharacter::UpdateAnimation()
 	float SideFacingSign = LastSideFacingSign;
 	int8 SideVerticalVariant = LastSideVerticalVariant;
 
-	if (bIsMoving)
+	bool bTargetLocked = IsValid(LockedTarget);
+
+	if (bIsMoving || bTargetLocked)
 	{
 		const float Speed = HorizontalVelocity.Size();
 		const FRotator YawRotation(0.0f, CameraYaw, 0.0f);
@@ -320,19 +419,29 @@ void AHybridSpriteCharacter::UpdateAnimation()
 
 		float LocalForward = 0.0f;
 		float LocalRight = 0.0f;
-		if (Speed > KINDA_SMALL_NUMBER)
+
+		if (bTargetLocked)
+		{
+			FVector ToTarget = (LockedTarget->GetActorLocation() - GetActorLocation());
+			ToTarget.Z = 0.0f;
+			ToTarget.Normalize();
+			
+			LocalForward = FVector::DotProduct(ToTarget, ForwardDirection);
+			LocalRight = FVector::DotProduct(ToTarget, RightDirection);
+		}
+		else if (Speed > KINDA_SMALL_NUMBER)
 		{
 			LocalForward = FVector::DotProduct(HorizontalVelocity, ForwardDirection) / Speed;
 			LocalRight = FVector::DotProduct(HorizontalVelocity, RightDirection) / Speed;
-		}
-
-		if (FMath::Abs(LocalForward) < AnimationInputDeadzone && FMath::Abs(LastMoveInputY) > AnimationInputDeadzone)
-		{
-			LocalForward = FMath::Sign(LastMoveInputY);
-		}
-		if (FMath::Abs(LocalRight) < AnimationInputDeadzone && FMath::Abs(LastMoveInputX) > AnimationInputDeadzone)
-		{
-			LocalRight = FMath::Sign(LastMoveInputX);
+			
+			if (FMath::Abs(LocalForward) < AnimationInputDeadzone && FMath::Abs(LastMoveInputY) > AnimationInputDeadzone)
+			{
+				LocalForward = FMath::Sign(LastMoveInputY);
+			}
+			if (FMath::Abs(LocalRight) < AnimationInputDeadzone && FMath::Abs(LastMoveInputX) > AnimationInputDeadzone)
+			{
+				LocalRight = FMath::Sign(LastMoveInputX);
+			}
 		}
 
 		const bool bHasForward = FMath::Abs(LocalForward) > AnimationInputDeadzone;
@@ -473,30 +582,43 @@ bool AHybridSpriteCharacter::CanAttack() const
 	return (CombatState == ECombatState::Idle || CombatState == ECombatState::Moving);
 }
 
+bool AHybridSpriteCharacter::CanMove() const
+{
+	return CombatState == ECombatState::Idle || CombatState == ECombatState::Moving;
+}
+
+void AHybridSpriteCharacter::SetWeaponEquipped(bool bNewWeaponEquipped)
+{
+	bWeaponEquipped = bNewWeaponEquipped;
+}
+
 void AHybridSpriteCharacter::StartAttack()
 {
 	if (!CanAttack() || !IsWeaponEquipped())
 	{
-		if (GEngine)
-		{
-			const FString Reason = !CanAttack()
-				? TEXT("Attack blocked: combat state does not allow attacking")
-				: TEXT("Attack blocked: no weapon equipped");
-			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, Reason);
-		}
-
 		return;
 	}
 
 	SetCombatState(ECombatState::Attacking);
+	bAttackSwingActive = true;
+	AttackSwingElapsed = 0.0f;
 
+	if (WeaponSlashSprite)
+	{
+		WeaponSlashSprite->SetSprite(WeaponSlashSpriteAsset);
+		WeaponSlashSprite->SetHiddenInGame(false);
+		WeaponSlashSprite->SetVisibility(true, true);
+		WeaponSlashSprite->SetRelativeLocation(FVector(SlashForwardOffset, 0.0f, 0.0f));
+		WeaponSlashSprite->SetRelativeRotation(FRotator(0.0f, -55.0f, 0.0f));
+	}
+	
+	// Print to screen to prove we are attacking
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, TEXT("Attack Windup..."));
 	}
 
-	ShowAttackArc();
-
+	// Step 1: Wait for windup to finish, then activate hitbox
 	GetWorldTimerManager().SetTimer(
 		AttackWindupTimerHandle,
 		this,
@@ -508,9 +630,11 @@ void AHybridSpriteCharacter::StartAttack()
 
 void AHybridSpriteCharacter::BeginAttackActiveFrames()
 {
-	if (!IsInState(ECombatState::Attacking))
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (WeaponSlashHitbox)
 	{
-		return;
+		WeaponSlashHitbox->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	}
 
 	if (GEngine)
@@ -518,6 +642,9 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("Attack ACTIVE! Hitbox is lethal."));
 	}
 
+	// Make the trace or hitbox active here (will do this next time)
+
+	// Step 2: Wait for active frames to end
 	GetWorldTimerManager().SetTimer(
 		AttackActiveTimerHandle,
 		this,
@@ -529,9 +656,11 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 
 void AHybridSpriteCharacter::EndAttackActiveFrames()
 {
-	if (!IsInState(ECombatState::Attacking))
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (WeaponSlashHitbox)
 	{
-		return;
+		WeaponSlashHitbox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	if (GEngine)
@@ -539,6 +668,9 @@ void AHybridSpriteCharacter::EndAttackActiveFrames()
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Orange, TEXT("Attack Recovery..."));
 	}
 
+	// Disable the trace or hitbox here
+
+	// Step 3: Wait for recovery to end
 	GetWorldTimerManager().SetTimer(
 		AttackRecoveryTimerHandle,
 		this,
@@ -550,9 +682,14 @@ void AHybridSpriteCharacter::EndAttackActiveFrames()
 
 void AHybridSpriteCharacter::FinishAttack()
 {
-	if (!IsInState(ECombatState::Attacking))
+	if (!IsInState(ECombatState::Attacking)) return;
+
+	if (WeaponSlashSprite)
 	{
-		return;
+		WeaponSlashSprite->SetHiddenInGame(true);
+		WeaponSlashSprite->SetVisibility(false, true);
+		WeaponSlashSprite->SetRelativeLocation(FVector(SlashForwardOffset, 0.0f, 0.0f));
+		WeaponSlashSprite->SetRelativeRotation(FRotator(0.0f, -55.0f, 0.0f));
 	}
 
 	if (GEngine)
@@ -560,8 +697,7 @@ void AHybridSpriteCharacter::FinishAttack()
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, TEXT("Attack finished, back to Idle."));
 	}
 
-	HideAttackArc();
-
+	// Reset state based on whether we are currently moving or not
 	if (GetVelocity().SizeSquared() > 0)
 	{
 		SetCombatState(ECombatState::Moving);
@@ -572,57 +708,173 @@ void AHybridSpriteCharacter::FinishAttack()
 	}
 }
 
-void AHybridSpriteCharacter::ShowAttackArc()
+void AHybridSpriteCharacter::ToggleTargetLock()
 {
-	AttackArcElapsed = 0.0f;
-	bAttackSlashVisible = true;
-
-	if (!AttackSlashSprite)
+	if (GEngine) 
 	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("ToggleTargetLock Fired!"));
+	}
+
+	if (IsValid(LockedTarget))
+	{
+		LockedTarget = nullptr;
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, TEXT("Target Dropped"));
 		return;
 	}
 
-	AttackSlashSprite->SetVisibility(true);
-	AttackSlashSprite->SetHiddenInGame(false);
-	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
-	AttackSlashSprite->SetRelativeScale3D(FVector(SwordScale, SwordScale, SwordScale));
+	TArray<AActor*> OverlappedActors;
+	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
+	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn));
 
-	if (SwordSprite)
+	UKismetSystemLibrary::SphereOverlapActors(
+		this,
+		GetActorLocation(),
+		TargetLockRadius,
+		ObjectTypes,
+		AActor::StaticClass(),
+		TArray<AActor*>{this},
+		OverlappedActors
+	);
+
+	AActor* BestTarget = nullptr;
+	float ClosestDistSq = MAX_flt;
+
+	for (AActor* Actor : OverlappedActors)
 	{
-		AttackSlashSprite->SetSprite(SwordSprite);
+		if (Actor && Actor->ActorHasTag(FName("Enemy")))
+		{
+			float DistSq = FVector::DistSquared(GetActorLocation(), Actor->GetActorLocation());
+			if (DistSq < ClosestDistSq)
+			{
+				ClosestDistSq = DistSq;
+				BestTarget = Actor;
+			}
+		}
+	}
+
+	if (BestTarget)
+	{
+		LockedTarget = BestTarget;
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, FString::Printf(TEXT("Locked: %s"), *BestTarget->GetName()));
+	}
+	else
+	{
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No enemy in range"));
 	}
 }
 
-void AHybridSpriteCharacter::HideAttackArc()
+void AHybridSpriteCharacter::OnAttackHitboxOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	bAttackSlashVisible = false;
+	if (OtherActor == this || OtherActor == nullptr) return;
 
-	if (!AttackSlashSprite)
+	// Only hit things tagged Enemy
+	if (OtherActor->ActorHasTag(FName("Enemy")))
 	{
-		return;
+		// Apply Damage
+		UGameplayStatics::ApplyDamage(OtherActor, AttackDamage, GetController(), this, UDamageType::StaticClass());
+		
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Purple, FString::Printf(TEXT("Dealt %f Damage to %s!"), AttackDamage, *OtherActor->GetName()));
+		}
 	}
-
-	AttackSlashSprite->SetVisibility(false);
-	AttackSlashSprite->SetHiddenInGame(true);
 }
 
-void AHybridSpriteCharacter::UpdateAttackArc(float DeltaTime)
+float AHybridSpriteCharacter::TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser)
 {
-	if (!bAttackSlashVisible || !AttackSlashSprite)
+	float Incoming = DamageAmount;
+
+	bool bParried = false;
+
+	if (bIsBlocking && DamageCauser)
 	{
-		return;
+		// Check if attacker is in front
+		FVector ToAttacker = (DamageCauser->GetActorLocation() - GetActorLocation()).GetSafeNormal();
+		FVector Forward = GetActorForwardVector();
+		float Dot = FVector::DotProduct(Forward, ToAttacker);
+
+		if (Dot > 0.0f)
+		{
+			if (bCanParry)
+			{
+				// Parry: negate damage and stun attacker
+				Incoming = 0.0f;
+				bParried = true;
+
+				if (GEngine)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 1.8f, FColor::Yellow, TEXT("Parried!"));
+				}
+
+				if (AHybridSpriteCharacter* AttackerChar = Cast<AHybridSpriteCharacter>(DamageCauser))
+				{
+					AttackerChar->SetCombatState(ECombatState::Stunned);
+					AttackerChar->GetWorldTimerManager().SetTimer(AttackerChar->StunTimerHandle, AttackerChar, &AHybridSpriteCharacter::RecoverFromStun, ParryStunDuration, false);
+				}
+			}
+			else
+			{
+				// Regular block: reduce damage
+				Incoming = DamageAmount * BlockDamageMultiplier;
+				if (GEngine)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Cyan, FString::Printf(TEXT("Blocked %f -> %f"), DamageAmount, Incoming));
+				}
+			}
+		}
 	}
 
-	AttackArcElapsed += DeltaTime;
-	const float NormalizedTime = FMath::Clamp(AttackArcElapsed / FMath::Max(SwordSwingDuration, 0.01f), 0.0f, 1.0f);
-	const float SwingAngle = FMath::Lerp(SwordSwingStartAngle, SwordSwingEndAngle, NormalizedTime);
+	float ActualDamage = Super::TakeDamage(Incoming, DamageEvent, EventInstigator, DamageCauser);
 
-	// Rotate sword like a clock hand around player center
-	AttackSlashSprite->SetRelativeLocation(FVector(0.0f, 0.0f, 0.0f));
-	AttackSlashSprite->SetRelativeRotation(FRotator(0.0f, 0.0f, SwingAngle));
-
-	if (NormalizedTime >= 1.0f)
+	if (ActualDamage > 0.0f)
 	{
-		HideAttackArc();
+		CurrentHealth = FMath::Clamp(CurrentHealth - ActualDamage, 0.0f, MaxHealth);
+
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, FString::Printf(TEXT("%s took %f damage! Health: %f / %f"), *GetName(), ActualDamage, CurrentHealth, MaxHealth));
+		}
 	}
+
+	return ActualDamage;
+}
+
+// -------------------------------------------------------------------------
+// Blocking / Parry
+// -------------------------------------------------------------------------
+
+void AHybridSpriteCharacter::StartBlock()
+{
+	if (!CanMove()) return;
+
+	bIsBlocking = true;
+	bCanParry = true;
+	SetCombatState(ECombatState::Blocking);
+
+	// After parry window, parry is no longer possible
+	GetWorldTimerManager().SetTimer(ParryTimerHandle, this, &AHybridSpriteCharacter::ClearParry, ParryWindow, false);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 0.8f, FColor::Blue, TEXT("Block start"));
+}
+
+void AHybridSpriteCharacter::EndBlock()
+{
+	bIsBlocking = false;
+	bCanParry = false;
+	SetCombatState(ECombatState::Idle);
+	GetWorldTimerManager().ClearTimer(ParryTimerHandle);
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 0.8f, FColor::Blue, TEXT("Block end"));
+}
+
+void AHybridSpriteCharacter::ClearParry()
+{
+	bCanParry = false;
+}
+
+void AHybridSpriteCharacter::RecoverFromStun()
+{
+	// Recover into Idle state
+	SetCombatState(ECombatState::Idle);
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 1.0f, FColor::Orange, TEXT("Recovered from stun"));
 }

@@ -11,11 +11,13 @@ class USpringArmComponent;
 class UCameraComponent;
 class UPaperFlipbookComponent;
 class UPaperSpriteComponent;
-class UPaperSprite;
+class UBoxComponent;
 class USceneComponent;
 class UInputMappingContext;
 class UInputAction;
 class UPaperFlipbook;
+class UPaperSprite;
+class UHealthBarWidget;
 
 UENUM()
 enum class EHybridSpriteDirection : uint8
@@ -46,6 +48,89 @@ class MGP_2526_API AHybridSpriteCharacter : public ACharacter
 public:
 	AHybridSpriteCharacter();
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|State")
+	ECombatState CombatState = ECombatState::Idle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Visual")
+	UPaperSpriteComponent* WeaponSlashSprite;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Visual")
+	UBoxComponent* WeaponSlashHitbox;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
+	class UWidgetComponent* HealthBarWidget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+	float MaxHealth = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+	float CurrentHealth = 100.0f;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Stats")
+	float GetHealthPercent() const { return MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 0.0f; }
+
+	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Visual")
+	UPaperSprite* WeaponSlashSpriteAsset;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackDamage = 20.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackWindupTime = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackActiveTime = 0.15f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float AttackRecoveryTime = 0.3f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SlashTravelDistance = 95.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SlashSweepWidth = 70.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
+	float SlashForwardOffset = 55.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|State")
+	bool bWeaponEquipped = true;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	void SetCombatState(ECombatState NewState);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	bool IsInState(ECombatState StateToCheck) const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	bool CanMove() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	bool CanAttack() const;
+
+	UFUNCTION(BlueprintImplementableEvent, BlueprintCallable, Category = "Combat|State")
+	bool IsWeaponEquipped() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|State")
+	void SetWeaponEquipped(bool bNewWeaponEquipped);
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void StartAttack();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void BeginAttackActiveFrames();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void EndAttackActiveFrames();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
+	void FinishAttack();
+
+	UFUNCTION()
+	void OnAttackHitboxOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
@@ -57,9 +142,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UPaperFlipbookComponent* Sprite;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UPaperSpriteComponent* AttackSlashSprite;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	USpringArmComponent* SpringArm;
@@ -86,10 +168,15 @@ protected:
 	UInputAction* AttackAction;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
+	UInputAction* LockOnAction;
+
+	// Input for blocking/parry
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
 	UInputAction* BlockAction;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input")
-	UInputAction* ParryAction;
+	FTimerHandle AttackWindupTimerHandle;
+	FTimerHandle AttackActiveTimerHandle;
+	FTimerHandle AttackRecoveryTimerHandle;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	UPaperFlipbook* IdleDownFlipbook;
@@ -189,6 +276,53 @@ protected:
 
 	float CameraBobTime = 0.0f;
 	FVector InitialSocketOffset;
+	float AttackSwingElapsed = 0.0f;
+	bool bAttackSwingActive = false;
+
+	// Targeting System
+	UPROPERTY(BlueprintReadOnly, Category = "Combat|Targeting")
+	AActor* LockedTarget = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Targeting")
+	float TargetLockRadius = 1500.0f;
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Targeting")
+	void ToggleTargetLock();
+
+	// Blocking API
+	UFUNCTION(BlueprintCallable, Category = "Combat|Defense")
+	void StartBlock();
+
+	UFUNCTION(BlueprintCallable, Category = "Combat|Defense")
+	void EndBlock();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Defense")
+	bool bIsBlocking = false;
+
+	// Short window after starting block that counts as a parry (completely negates and staggers)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float ParryWindow = 0.18f;
+
+	// True during the short parry window after starting a block
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Defense")
+	bool bCanParry = false;
+
+	// How long to stun an attacker if parried
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float ParryStunDuration = 1.0f;
+
+	UFUNCTION()
+	void ClearParry();
+
+	// Multiplier applied to incoming damage while blocking (0.0 = full block, 1.0 = no block)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float BlockDamageMultiplier = 0.35f;
+
+	UFUNCTION()
+	void RecoverFromStun();
+
+	FTimerHandle ParryTimerHandle;
+	FTimerHandle StunTimerHandle;
 
 protected:
 	void Move(const FInputActionValue& Value);
@@ -198,86 +332,6 @@ protected:
 
 	void UpdateCamera(float DeltaTime);
 	void UpdateAnimation();
+	void UpdateAttackSwing(float DeltaTime);
 	void SetFlipbookForState(bool bIsMoving, EHybridSpriteDirection Direction);
-
-public:
-	// -------------------------
-	// Combat State
-	// -------------------------
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|State")
-	ECombatState CombatState = ECombatState::Idle;
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|State")
-	void SetCombatState(ECombatState NewState);
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|State")
-	bool IsInState(ECombatState StateToCheck) const;
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|State")
-	bool CanAttack() const;
-
-	UFUNCTION(BlueprintImplementableEvent, BlueprintCallable, Category = "Combat|State")
-	bool IsWeaponEquipped() const;
-
-	// -------------------------
-	// Attack Mechanics
-	// -------------------------
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float AttackDamage = 20.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float AttackWindupTime = 0.15f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float AttackActiveTime = 0.15f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float AttackRecoveryTime = 0.3f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float SwordSwingStartAngle = -90.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float SwordSwingEndAngle = 90.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float SwordSwingDuration = 0.3f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	float SwordScale = 2.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
-	class UPaperSprite* SwordSprite;
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void StartAttack();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void BeginAttackActiveFrames();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void EndAttackActiveFrames();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void FinishAttack();
-
-protected:
-	FTimerHandle AttackWindupTimerHandle;
-	FTimerHandle AttackActiveTimerHandle;
-	FTimerHandle AttackRecoveryTimerHandle;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Attack")
-	bool bAttackSlashVisible = false;
-
-	float AttackArcElapsed = 0.0f;
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void UpdateAttackArc(float DeltaTime);
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void ShowAttackArc();
-
-	UFUNCTION(BlueprintCallable, Category = "Combat|Attack")
-	void HideAttackArc();
-
 };
