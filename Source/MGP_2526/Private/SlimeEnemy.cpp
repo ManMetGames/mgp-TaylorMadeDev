@@ -4,30 +4,51 @@
 #include "PaperFlipbook.h"
 #include "PaperFlipbookComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Engine/World.h"
-#include "Math/UnrealMathUtility.h"
-#include "Components/TextRenderComponent.h"
+#include "Engine/Engine.h"
+#include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 ASlimeEnemy::ASlimeEnemy()
 {
-    // Make sure this enemy doesn't try to attack the player by default
-    AttackRange = 0.0f;
-    DetectionRange = 0.0f;
-    EnemyAttackDamage = 0.0f;
+    bRotateSpriteWithCamera = true;
+    EnemyAttackDamage = SlimeDamage;
+    EnemyAttackWindupTime = SlimeAttackWindupTime;
+    EnemyAttackRecoveryTime = SlimeAttackRecoveryTime;
+    EnemyWalkSpeed = SlimeWalkSpeed;
+    DetectionRange = SlimeDetectionRange;
+    AttackRange = SlimeAttackRange;
 
-    WanderInterval = 2.0f;
-    WanderSpeed = 120.0f;
     if (GetCharacterMovement())
     {
-        GetCharacterMovement()->MaxWalkSpeed = WanderSpeed;
+        GetCharacterMovement()->MaxWalkSpeed = EnemyWalkSpeed;
     }
 
-    // Attempt to find a SlimeWalk flipbook asset. Adjust path if your asset lives elsewhere.
-    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> FlipbookObj(TEXT("/Game/PaperAssets/Enemy/Slime/SlimeWalk.SlimeWalk"));
-    if (FlipbookObj.Succeeded())
+    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> WalkLeftObj(TEXT("/Game/PaperAssets/Enemy/Slime/WalkLeft.WalkLeft"));
+    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> WalkRightObj(TEXT("/Game/PaperAssets/Enemy/Slime/WalkRight.WalkRight"));
+    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> WalkUpObj(TEXT("/Game/PaperAssets/Enemy/Slime/WalkUp.WalkUp"));
+    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> WalkDownObj(TEXT("/Game/PaperAssets/Enemy/Slime/WalkDown.WalkDown"));
+    static ConstructorHelpers::FObjectFinder<UPaperFlipbook> AttackFrontObj(TEXT("/Game/PaperAssets/Enemy/Slime/AttackFront.AttackFront"));
+
+    if (WalkLeftObj.Succeeded())
     {
-        SlimeWalkFlipbook = FlipbookObj.Object;
+        SlimeWalkLeftFlipbook = WalkLeftObj.Object;
+    }
+    if (WalkRightObj.Succeeded())
+    {
+        SlimeWalkRightFlipbook = WalkRightObj.Object;
+    }
+    if (WalkUpObj.Succeeded())
+    {
+        SlimeWalkUpFlipbook = WalkUpObj.Object;
+    }
+    if (WalkDownObj.Succeeded())
+    {
+        SlimeWalkDownFlipbook = WalkDownObj.Object;
+    }
+    if (AttackFrontObj.Succeeded())
+    {
+        SlimeAttackFrontFlipbook = AttackFrontObj.Object;
     }
 }
 
@@ -35,56 +56,242 @@ void ASlimeEnemy::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Ensure we start with the slime walk animation if available
-    if (Sprite && SlimeWalkFlipbook)
+    // Make sure the slime actually threatens the player.
+    EnemyAttackDamage = SlimeDamage;
+    EnemyAttackWindupTime = SlimeAttackWindupTime;
+    EnemyAttackRecoveryTime = SlimeAttackRecoveryTime;
+    EnemyWalkSpeed = SlimeWalkSpeed;
+    DetectionRange = SlimeDetectionRange;
+    AttackRange = SlimeAttackRange;
+
+    if (GetCharacterMovement())
     {
-        Sprite->SetFlipbook(SlimeWalkFlipbook);
+        GetCharacterMovement()->MaxWalkSpeed = EnemyWalkSpeed;
     }
 
-    // initialize wander timer so we pick a direction immediately
-    WanderTimer = 0.0f;
+    FindTargetPlayer();
+
+    if (Sprite)
+    {
+        SetSlimeFlipbook(GetWalkFlipbookForFacing(SlimeFacingDirection));
+    }
 }
 
 void ASlimeEnemy::Tick(float DeltaTime)
 {
-    // Call the hybrid sprite tick to update animations and camera bob, but skip Enemy AI
-    AHybridSpriteCharacter::Tick(DeltaTime);
-
-    UpdateWander(DeltaTime);
-
-    // Keep status text updated and facing the player
-    UpdateStatusText();
-}
-
-void ASlimeEnemy::UpdateWander(float DeltaTime)
-{
-    if (WanderTimer <= 0.0f || WanderDirection.IsNearlyZero())
+    if (TargetPlayer)
     {
-        // Pick a new random horizontal direction
-        WanderDirection = FVector(FMath::FRandRange(-1.0f, 1.0f), FMath::FRandRange(-1.0f, 1.0f), 0.0f).GetSafeNormal();
-        WanderInterval = FMath::FRandRange(1.2f, 3.0f);
-        WanderTimer = WanderInterval;
+        CameraYaw = TargetPlayer->GetCameraYaw();
     }
 
-    WanderTimer -= DeltaTime;
+    AEnemyCharacter::Tick(DeltaTime);
+    UpdateSlimeAnimation();
+}
 
-    // Move the slime along the chosen direction
-    if (!WanderDirection.IsNearlyZero())
+void ASlimeEnemy::FindTargetPlayer()
+{
+    TargetPlayer = Cast<AHybridSpriteCharacter>(UGameplayStatics::GetPlayerCharacter(this, 0));
+}
+
+void ASlimeEnemy::UpdateSlimeCombat(float DeltaTime)
+
+
+{
+    if (!IsValid(TargetPlayer))
     {
-        if (GetCharacterMovement())
-        {
-            GetCharacterMovement()->MaxWalkSpeed = WanderSpeed;
-        }
-        AddMovementInput(WanderDirection, 1.0f);
-        SetCombatState(ECombatState::Moving);
+        FindTargetPlayer();
+        AIState = EEnemyAIState::Idle;
+        SetCombatState(ECombatState::Idle);
+        return;
+    }
 
-        if (Sprite && SlimeWalkFlipbook)
+    const float DistanceToPlayer = FVector::Dist(GetActorLocation(), TargetPlayer->GetActorLocation());
+
+    switch (AIState)
+    {
+    case EEnemyAIState::Idle:
+        SetCombatState(ECombatState::Idle);
+        if (DistanceToPlayer <= DetectionRange)
         {
-            Sprite->SetFlipbook(SlimeWalkFlipbook);
+            AIState = EEnemyAIState::Chasing;
+        }
+        break;
+
+    case EEnemyAIState::Chasing:
+        SetCombatState(ECombatState::Moving);
+        if (DistanceToPlayer <= AttackRange)
+        {
+            StartSlimeAttack();
+        }
+        else
+        {
+            if (GetCharacterMovement())
+            {
+                GetCharacterMovement()->MaxWalkSpeed = EnemyWalkSpeed;
+            }
+
+            const FVector ToTarget = (TargetPlayer->GetActorLocation() - GetActorLocation());
+            FVector FlatTarget = ToTarget;
+            FlatTarget.Z = 0.0f;
+
+            if (!FlatTarget.IsNearlyZero())
+            {
+                const FVector NormalizedTarget = FlatTarget.GetSafeNormal();
+                AddMovementInput(NormalizedTarget, 1.0f);
+
+                if (FMath::Abs(NormalizedTarget.X) > FMath::Abs(NormalizedTarget.Y))
+                {
+                    SlimeFacingDirection = NormalizedTarget.X < 0.0f ? ESlimeFacingDirection::Right : ESlimeFacingDirection::Left;
+                }
+                else
+                {
+                    SlimeFacingDirection = NormalizedTarget.Y > 0.0f ? ESlimeFacingDirection::Down : ESlimeFacingDirection::Up;
+                }
+            }
+        }
+        break;
+
+    case EEnemyAIState::AttackWindup:
+        StateElapsed += DeltaTime;
+        SetCombatState(ECombatState::Attacking);
+        if (StateElapsed >= EnemyAttackWindupTime)
+        {
+            ApplySlimeAttackDamage();
+            AIState = EEnemyAIState::Recovering;
+            StateElapsed = 0.0f;
+        }
+        break;
+
+    case EEnemyAIState::Recovering:
+        RecoverFromSlimeAttack(DeltaTime);
+        break;
+    }
+}
+
+void ASlimeEnemy::UpdateSlimeAnimation()
+{
+    if (!Sprite)
+    {
+        return;
+    }
+
+    if (TargetPlayer)
+    {
+        FVector ToTarget = TargetPlayer->GetActorLocation() - GetActorLocation();
+        ToTarget.Z = 0.0f;
+
+        if (!ToTarget.IsNearlyZero())
+        {
+            const FVector NormalizedTarget = ToTarget.GetSafeNormal();
+            if (FMath::Abs(NormalizedTarget.X) > FMath::Abs(NormalizedTarget.Y))
+            {
+					SlimeFacingDirection = NormalizedTarget.X < 0.0f ? ESlimeFacingDirection::Right : ESlimeFacingDirection::Left;
+            }
+            else
+            {
+					SlimeFacingDirection = NormalizedTarget.Y > 0.0f ? ESlimeFacingDirection::Down : ESlimeFacingDirection::Up;
+            }
         }
     }
     else
     {
-        SetCombatState(ECombatState::Idle);
+        const FVector Velocity = GetVelocity();
+        FVector FlatVelocity(Velocity.X, Velocity.Y, 0.0f);
+        if (!FlatVelocity.IsNearlyZero())
+        {
+            FlatVelocity.Normalize();
+            if (FMath::Abs(FlatVelocity.X) > FMath::Abs(FlatVelocity.Y))
+            {
+					SlimeFacingDirection = FlatVelocity.X < 0.0f ? ESlimeFacingDirection::Right : ESlimeFacingDirection::Left;
+            }
+            else
+            {
+					SlimeFacingDirection = FlatVelocity.Y > 0.0f ? ESlimeFacingDirection::Down : ESlimeFacingDirection::Up;
+            }
+        }
+    }
+
+    UPaperFlipbook* Desired = nullptr;
+
+    if (AIState == EEnemyAIState::AttackWindup || CombatState == ECombatState::Attacking)
+    {
+        Desired = SlimeAttackFrontFlipbook;
+    }
+    else
+    {
+        Desired = GetWalkFlipbookForFacing(SlimeFacingDirection);
+    }
+
+    SetSlimeFlipbook(Desired);
+    UpdateStatusText();
+}
+
+void ASlimeEnemy::SetSlimeFlipbook(UPaperFlipbook* DesiredFlipbook)
+{
+    if (!Sprite || !DesiredFlipbook)
+    {
+        return;
+    }
+
+    if (Sprite->GetFlipbook() != DesiredFlipbook)
+    {
+        Sprite->SetFlipbook(DesiredFlipbook);
+        Sprite->SetLooping(true);
+        Sprite->PlayFromStart();
+    }
+    else if (!Sprite->IsPlaying())
+    {
+        Sprite->Play();
+    }
+}
+
+UPaperFlipbook* ASlimeEnemy::GetWalkFlipbookForFacing(ESlimeFacingDirection Facing) const
+{
+    switch (Facing)
+    {
+    case ESlimeFacingDirection::Left:
+        return SlimeWalkRightFlipbook ? SlimeWalkRightFlipbook : SlimeWalkLeftFlipbook;
+    case ESlimeFacingDirection::Right:
+        return SlimeWalkLeftFlipbook ? SlimeWalkLeftFlipbook : SlimeWalkRightFlipbook;
+    case ESlimeFacingDirection::Down:
+        return SlimeWalkUpFlipbook ? SlimeWalkUpFlipbook : (SlimeWalkDownFlipbook ? SlimeWalkDownFlipbook : SlimeWalkLeftFlipbook);
+    default:
+        return SlimeWalkDownFlipbook ? SlimeWalkDownFlipbook : (SlimeWalkUpFlipbook ? SlimeWalkUpFlipbook : (SlimeWalkLeftFlipbook ? SlimeWalkLeftFlipbook : SlimeWalkRightFlipbook));
+    }
+}
+
+void ASlimeEnemy::StartSlimeAttack()
+{
+    AIState = EEnemyAIState::AttackWindup;
+    StateElapsed = 0.0f;
+    bDamageAppliedThisAttack = false;
+    SetCombatState(ECombatState::Attacking);
+}
+
+void ASlimeEnemy::ApplySlimeAttackDamage()
+{
+    if (!TargetPlayer || bDamageAppliedThisAttack)
+    {
+        return;
+    }
+
+    bDamageAppliedThisAttack = true;
+    UGameplayStatics::ApplyDamage(TargetPlayer, SlimeDamage, GetController(), this, UDamageType::StaticClass());
+
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(-1, 1.25f, FColor::Red, TEXT("Slime hit the player for 1 damage"));
+    }
+}
+
+void ASlimeEnemy::RecoverFromSlimeAttack(float DeltaTime)
+{
+    StateElapsed += DeltaTime;
+    SetCombatState(ECombatState::Idle);
+
+    if (StateElapsed >= EnemyAttackRecoveryTime)
+    {
+        StateElapsed = 0.0f;
+        AIState = EEnemyAIState::Chasing;
     }
 }

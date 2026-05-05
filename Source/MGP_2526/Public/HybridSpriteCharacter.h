@@ -69,6 +69,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Stats")
 	float GetHealthPercent() const { return MaxHealth > 0.0f ? CurrentHealth / MaxHealth : 0.0f; }
 
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Camera")
+	float GetCameraYaw() const { return CameraYaw; }
+
 	virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Visual")
@@ -303,9 +306,27 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
 	float ParryWindow = 0.18f;
 
+	// Debug sphere shown while parry is active
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	bool bShowParryDebugSphere = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float ParryDebugSphereRadius = 80.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float ParryDebugSphereForwardOffset = 45.0f;
+
+	// How long after ending a block before you can block again
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
+	float BlockCooldown = 1.0f;
+
 	// True during the short parry window after starting a block
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Defense")
 	bool bCanParry = false;
+
+	// Prevents re-blocking until the cooldown expires
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Defense")
+	bool bBlockOnCooldown = false;
 
 	// How long to stun an attacker if parried
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
@@ -313,6 +334,9 @@ protected:
 
 	UFUNCTION()
 	void ClearParry();
+
+	UFUNCTION()
+	void ClearBlockCooldown();
 
 	// Multiplier applied to incoming damage while blocking (0.0 = full block, 1.0 = no block)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
@@ -322,6 +346,7 @@ protected:
 	void RecoverFromStun();
 
 	FTimerHandle ParryTimerHandle;
+	FTimerHandle BlockCooldownTimerHandle;
 	FTimerHandle StunTimerHandle;
 
 protected:

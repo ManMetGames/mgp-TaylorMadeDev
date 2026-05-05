@@ -7,6 +7,15 @@
 
 class UPaperFlipbook;
 
+UENUM(BlueprintType)
+enum class ESlimeFacingDirection : uint8
+{
+    Left,
+    Right,
+    Down,
+    Up
+};
+
 UCLASS()
 class MGP_2526_API ASlimeEnemy : public AEnemyCharacter
 {
@@ -19,15 +28,51 @@ public:
     virtual void Tick(float DeltaTime) override;
 
 protected:
-    // Walk flipbook for the slime
+    // Walk/attack flipbooks for the slime
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Animation")
-    UPaperFlipbook* SlimeWalkFlipbook = nullptr;
+    UPaperFlipbook* SlimeWalkLeftFlipbook = nullptr;
 
-    // Wander state
-    FVector WanderDirection = FVector::ZeroVector;
-    float WanderTimer = 0.0f;
-    float WanderInterval = 2.0f;
-    float WanderSpeed = 150.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Animation")
+    UPaperFlipbook* SlimeWalkRightFlipbook = nullptr;
 
-    void UpdateWander(float DeltaTime);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Animation")
+    UPaperFlipbook* SlimeWalkUpFlipbook = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Animation")
+    UPaperFlipbook* SlimeWalkDownFlipbook = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Animation")
+    UPaperFlipbook* SlimeAttackFrontFlipbook = nullptr;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeDamage = 1.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeWalkSpeed = 210.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeDetectionRange = 1600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeAttackRange = 140.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeAttackWindupTime = 0.45f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeAttackRecoveryTime = 0.45f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Slime|Combat")
+    float SlimeParryWindow = 0.18f;
+
+    ESlimeFacingDirection SlimeFacingDirection = ESlimeFacingDirection::Up;
+
+    void FindTargetPlayer();
+    void UpdateSlimeCombat(float DeltaTime);
+    void UpdateSlimeAnimation();
+    void SetSlimeFlipbook(UPaperFlipbook* DesiredFlipbook);
+    UPaperFlipbook* GetWalkFlipbookForFacing(ESlimeFacingDirection Facing) const;
+    void StartSlimeAttack();
+    void ApplySlimeAttackDamage();
+    void RecoverFromSlimeAttack(float DeltaTime);
 };

@@ -168,8 +168,8 @@ void AEnemyCharacter::UpdateStatusText()
 		if (!ToPlayer.IsNearlyZero())
 		{
 			const FRotator LookAt = ToPlayer.Rotation();
-			// Yaw +180 so the text faces the camera/player
-			EnemyStatusText->SetWorldRotation(FRotator(0.0f, LookAt.Yaw + 180.0f, 0.0f));
+			// Reverse the previous orientation so the text reads the other way.
+			EnemyStatusText->SetWorldRotation(FRotator(0.0f, LookAt.Yaw, 0.0f));
 		}
 	}
 }
