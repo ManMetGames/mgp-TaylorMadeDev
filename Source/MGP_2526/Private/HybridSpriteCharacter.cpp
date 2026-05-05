@@ -24,6 +24,7 @@
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "DrawDebugHelpers.h"
+#include "EnemyCharacter.h"
 
 AHybridSpriteCharacter::AHybridSpriteCharacter()
 {
@@ -611,9 +612,11 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 {
 	if (!IsInState(ECombatState::Attacking)) return;
 
-	const FVector Forward = GetActorForwardVector();
-	const FVector SphereCenter = GetActorLocation() + Forward * SlashForwardOffset;
+	const FRotator AimRotation(0.0f, CameraYaw, 0.0f);
+	const FVector AimForward = UKismetMathLibrary::GetForwardVector(AimRotation);
+	const FVector SphereCenter = GetActorLocation() + AimForward * SlashForwardOffset;
 	const float SphereRadius = FMath::Max(10.0f, SlashSweepWidth);
+	const float AimWeight = 500.0f;
 
 	TArray<AActor*> OverlapActors;
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
@@ -629,6 +632,9 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 		OverlapActors
 	);
 
+	AActor* BestTarget = nullptr;
+	float BestScore = -MAX_flt;
+
 	for (AActor* Actor : OverlapActors)
 	{
 		if (!Actor || Actor == this)
@@ -641,11 +647,25 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 			continue;
 		}
 
-		UGameplayStatics::ApplyDamage(Actor, AttackDamage, GetController(), this, UDamageType::StaticClass());
+		const FVector ToActor = (Actor->GetActorLocation() - SphereCenter).GetSafeNormal();
+		const float AimDot = FVector::DotProduct(AimForward, ToActor);
+
+		const float DistSq = FVector::DistSquared(SphereCenter, Actor->GetActorLocation());
+		const float Score = (AimDot * AimWeight) - DistSq;
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			BestTarget = Actor;
+		}
+	}
+
+	if (BestTarget)
+	{
+		UGameplayStatics::ApplyDamage(BestTarget, AttackDamage, GetController(), this, UDamageType::StaticClass());
 
 		if (GEngine)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, FString::Printf(TEXT("Hit %s for %f"), *Actor->GetName(), AttackDamage));
+			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, FString::Printf(TEXT("Smart hit %s for %f"), *BestTarget->GetName(), AttackDamage));
 		}
 	}
 
@@ -720,13 +740,6 @@ void AHybridSpriteCharacter::ToggleTargetLock()
 		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Yellow, TEXT("ToggleTargetLock Fired!"));
 	}
 
-	if (IsValid(LockedTarget))
-	{
-		LockedTarget = nullptr;
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, TEXT("Target Dropped"));
-		return;
-	}
-
 	TArray<AActor*> OverlappedActors;
 	TArray<TEnumAsByte<EObjectTypeQuery>> ObjectTypes;
 	ObjectTypes.Add(UEngineTypes::ConvertToObjectType(ECollisionChannel::ECC_Pawn));
@@ -741,31 +754,78 @@ void AHybridSpriteCharacter::ToggleTargetLock()
 		OverlappedActors
 	);
 
-	AActor* BestTarget = nullptr;
-	float ClosestDistSq = MAX_flt;
-
+	TArray<AActor*> EnemyTargets;
 	for (AActor* Actor : OverlappedActors)
 	{
 		if (Actor && Actor->ActorHasTag(FName("Enemy")))
 		{
-			float DistSq = FVector::DistSquared(GetActorLocation(), Actor->GetActorLocation());
-			if (DistSq < ClosestDistSq)
-			{
-				ClosestDistSq = DistSq;
-				BestTarget = Actor;
-			}
+			EnemyTargets.Add(Actor);
 		}
 	}
 
-	if (BestTarget)
+	if (EnemyTargets.Num() == 0)
 	{
-		LockedTarget = BestTarget;
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, FString::Printf(TEXT("Locked: %s"), *BestTarget->GetName()));
+		LockedTarget = nullptr;
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No enemy in range"));
+		return;
+	}
+
+	// Find the nearest enemy so the first tap has a stable target.
+	AActor* NearestTarget = nullptr;
+	float NearestDistSq = MAX_flt;
+	for (AActor* Actor : EnemyTargets)
+	{
+		const float DistSq = FVector::DistSquared(GetActorLocation(), Actor->GetActorLocation());
+		if (DistSq < NearestDistSq)
+		{
+			NearestDistSq = DistSq;
+			NearestTarget = Actor;
+		}
+	}
+
+	// First tap locks the nearest target. A second tap within the window cycles to the next one.
+	if (!IsValid(LockedTarget))
+	{
+		LockedTarget = NearestTarget;
+		bLockOnDoubleTapPending = true;
+		GetWorldTimerManager().ClearTimer(LockOnTapTimerHandle);
+		GetWorldTimerManager().SetTimer(LockOnTapTimerHandle, this, &AHybridSpriteCharacter::ClearLockOnDoubleTap, LockOnDoubleTapWindow, false);
+
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, FString::Printf(TEXT("Locked: %s"), *LockedTarget->GetName()));
+		return;
+	}
+
+	if (!bLockOnDoubleTapPending)
+	{
+		bLockOnDoubleTapPending = true;
+		GetWorldTimerManager().ClearTimer(LockOnTapTimerHandle);
+		GetWorldTimerManager().SetTimer(LockOnTapTimerHandle, this, &AHybridSpriteCharacter::ClearLockOnDoubleTap, LockOnDoubleTapWindow, false);
+		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 1.2f, FColor::Yellow, TEXT("Tap again to switch target"));
+		return;
+	}
+
+	// Second tap within the window: cycle to the next enemy.
+	bLockOnDoubleTapPending = false;
+	GetWorldTimerManager().ClearTimer(LockOnTapTimerHandle);
+
+	int32 CurrentIndex = EnemyTargets.IndexOfByKey(LockedTarget);
+	if (CurrentIndex == INDEX_NONE)
+	{
+		LockedTarget = NearestTarget;
 	}
 	else
 	{
-		if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Red, TEXT("No enemy in range"));
+		const int32 NextIndex = (CurrentIndex + 1) % EnemyTargets.Num();
+		LockedTarget = EnemyTargets[NextIndex];
 	}
+
+	if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, FString::Printf(TEXT("Switched lock: %s"), *LockedTarget->GetName()));
+	return;
+}
+
+void AHybridSpriteCharacter::ClearLockOnDoubleTap()
+{
+	bLockOnDoubleTapPending = false;
 }
 
 void AHybridSpriteCharacter::OnAttackHitboxOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
@@ -811,10 +871,42 @@ float AHybridSpriteCharacter::TakeDamage(float DamageAmount, struct FDamageEvent
 					GEngine->AddOnScreenDebugMessage(-1, 1.8f, FColor::Yellow, TEXT("Parried!"));
 				}
 
-				if (AHybridSpriteCharacter* AttackerChar = Cast<AHybridSpriteCharacter>(DamageCauser))
+				// Try to stun the direct causer first. Enemies must go through AEnemyCharacter::Stun()
+				// so their AI state becomes Stunned, not just their combat state.
+				if (AEnemyCharacter* AttackerEnemy = Cast<AEnemyCharacter>(DamageCauser))
+				{
+					AttackerEnemy->Stun(ParryStunDuration);
+				}
+				else if (AHybridSpriteCharacter* AttackerChar = Cast<AHybridSpriteCharacter>(DamageCauser))
 				{
 					AttackerChar->SetCombatState(ECombatState::Stunned);
+					AttackerChar->GetWorldTimerManager().ClearTimer(AttackerChar->StunTimerHandle);
 					AttackerChar->GetWorldTimerManager().SetTimer(AttackerChar->StunTimerHandle, AttackerChar, &AHybridSpriteCharacter::RecoverFromStun, ParryStunDuration, false);
+				}
+				else
+				{
+					AEnemyCharacter* FallbackEnemy = nullptr;
+
+					// If the causer is a component or projectile, try its owner as a fallback
+					if (DamageCauser && DamageCauser->GetOwner())
+					{
+						AActor* DamageOwner = DamageCauser->GetOwner();
+						FallbackEnemy = Cast<AEnemyCharacter>(DamageOwner);
+						if (FallbackEnemy)
+						{
+							FallbackEnemy->Stun(ParryStunDuration);
+						}
+						else
+						{
+							// maybe owner is a player-derived character
+							if (AHybridSpriteCharacter* OwnerChar = Cast<AHybridSpriteCharacter>(DamageOwner))
+							{
+								OwnerChar->SetCombatState(ECombatState::Stunned);
+								OwnerChar->GetWorldTimerManager().ClearTimer(OwnerChar->StunTimerHandle);
+								OwnerChar->GetWorldTimerManager().SetTimer(OwnerChar->StunTimerHandle, OwnerChar, &AHybridSpriteCharacter::RecoverFromStun, ParryStunDuration, false);
+							}
+						}
+					}
 				}
 			}
 			else
@@ -886,6 +978,15 @@ void AHybridSpriteCharacter::EndBlock()
 void AHybridSpriteCharacter::ClearParry()
 {
 	bCanParry = false;
+
+	// After the parry window ends, if we're still holding block, draw a blue sphere
+	// to indicate the blocking state (different color from the green parry window).
+	if (bIsBlocking && bShowParryDebugSphere && GetWorld())
+	{
+		const FVector ParryCenter = GetActorLocation() + GetActorForwardVector() * ParryDebugSphereForwardOffset;
+		// Draw a blue debug sphere for a short time to represent blocking state
+		DrawDebugSphere(GetWorld(), ParryCenter, ParryDebugSphereRadius, 16, FColor::Blue, false, 1.0f, 0, 2.0f);
+	}
 }
 
 void AHybridSpriteCharacter::ClearBlockCooldown()

@@ -14,6 +14,7 @@ enum class EEnemyAIState : uint8
 {
 	Idle,
 	Chasing,
+	Stunned,
 	AttackWindup,
 	Recovering
 };
@@ -25,6 +26,10 @@ class MGP_2526_API AEnemyCharacter : public AHybridSpriteCharacter
 
 public:
 	AEnemyCharacter();
+
+	// Stun the enemy for the given duration (used by parry)
+	UFUNCTION(BlueprintCallable, Category = "Enemy|State")
+	void Stun(float Duration);
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
@@ -59,6 +64,10 @@ protected:
 
 	float StateElapsed = 0.0f;
 	bool bDamageAppliedThisAttack = false;
+
+	FTimerHandle StunTimerHandle;
+
+	void ClearStun();
 
 	void FindTarget();
 	void UpdateEnemyAI(float DeltaTime);

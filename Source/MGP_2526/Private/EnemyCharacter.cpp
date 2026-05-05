@@ -9,6 +9,7 @@
 #include "HealthBarWidget.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
+#include "TimerManager.h"
 
 AEnemyCharacter::AEnemyCharacter()
 {
@@ -98,6 +99,17 @@ void AEnemyCharacter::UpdateEnemyAI(float DeltaTime)
 		return;
 	}
 
+	if (AIState == EEnemyAIState::Stunned)
+	{
+		SetCombatState(ECombatState::Stunned);
+		if (GetCharacterMovement())
+		{
+			GetCharacterMovement()->StopMovementImmediately();
+			GetCharacterMovement()->DisableMovement();
+		}
+		return;
+	}
+
 	const float DistanceToPlayer = FVector::Dist(GetActorLocation(), TargetPlayer->GetActorLocation());
 
 	switch (AIState)
@@ -147,15 +159,23 @@ void AEnemyCharacter::UpdateStatusText()
 	}
 
 	const bool bAttacking = AIState == EEnemyAIState::AttackWindup || CombatState == ECombatState::Attacking;
+	const bool bCanBeParried = AIState == EEnemyAIState::AttackWindup;
+	const FString StateText =
+		AIState == EEnemyAIState::Idle ? TEXT("Idle") :
+		AIState == EEnemyAIState::Chasing ? TEXT("Chasing") :
+		AIState == EEnemyAIState::Stunned ? TEXT("Stunned") :
+		AIState == EEnemyAIState::AttackWindup ? TEXT("AttackWindup") :
+		TEXT("Recovering");
+
+	const FString PromptText = bCanBeParried ? TEXT("\nParry now!") : TEXT("");
+
 	const FString Status = FString::Printf(
-		TEXT("Health: %.0f/%.0f\nAttacking: %s\nState: %s"),
+		TEXT("Health: %.0f/%.0f\nAttacking: %s\nState: %s%s"),
 		CurrentHealth,
 		MaxHealth,
 		bAttacking ? TEXT("True") : TEXT("False"),
-		AIState == EEnemyAIState::Idle ? TEXT("Idle") :
-		AIState == EEnemyAIState::Chasing ? TEXT("Chasing") :
-		AIState == EEnemyAIState::AttackWindup ? TEXT("AttackWindup") :
-		TEXT("Recovering")
+		*StateText,
+		*PromptText
 	);
 
 	EnemyStatusText->SetText(FText::FromString(Status));
@@ -223,5 +243,38 @@ void AEnemyCharacter::RecoverFromAttack(float DeltaTime)
 	{
 		StateElapsed = 0.0f;
 		AIState = EEnemyAIState::Chasing;
+	}
+}
+
+void AEnemyCharacter::Stun(float Duration)
+{
+	// Cancel other AI state timers and enter stunned state
+	AIState = EEnemyAIState::Stunned;
+	SetCombatState(ECombatState::Stunned);
+	SetActorTickEnabled(false);
+
+	// Stop movement immediately
+	if (GetCharacterMovement())
+	{
+		GetCharacterMovement()->StopMovementImmediately();
+		GetCharacterMovement()->DisableMovement();
+	}
+
+	UpdateStatusText();
+
+	// Set a timer to clear stun
+	GetWorldTimerManager().ClearTimer(StunTimerHandle);
+	GetWorldTimerManager().SetTimer(StunTimerHandle, this, &AEnemyCharacter::ClearStun, Duration, false);
+}
+
+void AEnemyCharacter::ClearStun()
+{
+	AIState = EEnemyAIState::Idle;
+	SetCombatState(ECombatState::Idle);
+	SetActorTickEnabled(true);
+
+	if (GetCharacterMovement())
+	{
+		GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 	}
 }

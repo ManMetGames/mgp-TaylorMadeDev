@@ -292,6 +292,9 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "Combat|Targeting")
 	void ToggleTargetLock();
 
+	UFUNCTION()
+	void ClearLockOnDoubleTap();
+
 	// Blocking API
 	UFUNCTION(BlueprintCallable, Category = "Combat|Defense")
 	void StartBlock();
@@ -320,6 +323,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
 	float BlockCooldown = 1.0f;
 
+	// Double-tap timing for switching enemy lock-on targets
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Targeting")
+	float LockOnDoubleTapWindow = 0.3f;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Targeting")
+	bool bLockOnDoubleTapPending = false;
+
 	// True during the short parry window after starting a block
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Defense")
 	bool bCanParry = false;
@@ -330,7 +340,7 @@ protected:
 
 	// How long to stun an attacker if parried
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
-	float ParryStunDuration = 1.0f;
+	float ParryStunDuration = 5.0f;
 
 	UFUNCTION()
 	void ClearParry();
@@ -346,6 +356,7 @@ protected:
 	void RecoverFromStun();
 
 	FTimerHandle ParryTimerHandle;
+	FTimerHandle LockOnTapTimerHandle;
 	FTimerHandle BlockCooldownTimerHandle;
 	FTimerHandle StunTimerHandle;
 
