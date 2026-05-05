@@ -18,6 +18,7 @@ class UInputAction;
 class UPaperFlipbook;
 class UPaperSprite;
 class UHealthBarWidget;
+class USoundBase;
 
 UENUM()
 enum class EHybridSpriteDirection : uint8
@@ -97,6 +98,18 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Attack")
 	float SlashForwardOffset = 55.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Audio")
+	USoundBase* ParrySoundAsset = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Audio")
+	USoundBase* BlockSoundAsset = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Audio")
+	USoundBase* SwingSoundAsset = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Audio")
+	USoundBase* HitSoundAsset = nullptr;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|State")
 	bool bWeaponEquipped = true;

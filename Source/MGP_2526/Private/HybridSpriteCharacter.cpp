@@ -25,6 +25,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "DrawDebugHelpers.h"
 #include "EnemyCharacter.h"
+#include "Sound/SoundBase.h"
 
 AHybridSpriteCharacter::AHybridSpriteCharacter()
 {
@@ -118,6 +119,30 @@ AHybridSpriteCharacter::AHybridSpriteCharacter()
 	else
 	{
 		UE_LOG(LogTemp, Warning, TEXT("HybridSpriteCharacter: Could not load Idle_Down flipbook."));
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> ParrySoundObj(TEXT("/Game/SFX/Parry"));
+	if (ParrySoundObj.Succeeded())
+	{
+		ParrySoundAsset = ParrySoundObj.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> BlockSoundObj(TEXT("/Game/SFX/Block"));
+	if (BlockSoundObj.Succeeded())
+	{
+		BlockSoundAsset = BlockSoundObj.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> SwingSoundObj(TEXT("/Game/SFX/Swing"));
+	if (SwingSoundObj.Succeeded())
+	{
+		SwingSoundAsset = SwingSoundObj.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> HitSoundObj(TEXT("/Game/SFX/Hit"));
+	if (HitSoundObj.Succeeded())
+	{
+		HitSoundAsset = HitSoundObj.Object;
 	}
 
 	SpringArm = CreateDefaultSubobject<USpringArmComponent>(TEXT("SpringArm"));
@@ -598,6 +623,11 @@ void AHybridSpriteCharacter::StartAttack()
 		GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Yellow, TEXT("Attack Windup..."));
 	}
 
+	if (SwingSoundAsset && GetWorld())
+	{
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), SwingSoundAsset, GetActorLocation());
+	}
+
 	// Step 1: Wait for windup to finish, then activate hitbox
 	GetWorldTimerManager().SetTimer(
 		AttackWindupTimerHandle,
@@ -662,6 +692,11 @@ void AHybridSpriteCharacter::BeginAttackActiveFrames()
 	if (BestTarget)
 	{
 		UGameplayStatics::ApplyDamage(BestTarget, AttackDamage, GetController(), this, UDamageType::StaticClass());
+
+		if (HitSoundAsset && GetWorld())
+		{
+			UGameplayStatics::PlaySoundAtLocation(GetWorld(), HitSoundAsset, BestTarget->GetActorLocation());
+		}
 
 		if (GEngine)
 		{
@@ -871,13 +906,15 @@ float AHybridSpriteCharacter::TakeDamage(float DamageAmount, struct FDamageEvent
 					GEngine->AddOnScreenDebugMessage(-1, 1.8f, FColor::Yellow, TEXT("Parried!"));
 				}
 
-				// Try to stun the direct causer first. Enemies must go through AEnemyCharacter::Stun()
-				// so their AI state becomes Stunned, not just their combat state.
-				if (AEnemyCharacter* AttackerEnemy = Cast<AEnemyCharacter>(DamageCauser))
-				{
-					AttackerEnemy->Stun(ParryStunDuration);
-				}
-				else if (AHybridSpriteCharacter* AttackerChar = Cast<AHybridSpriteCharacter>(DamageCauser))
+		if (ParrySoundAsset && GetWorld())
+		{
+			UGameplayStatics::PlaySoundAtLocation(GetWorld(), ParrySoundAsset, GetActorLocation());
+		}
+		if (AEnemyCharacter* AttackerEnemy = Cast<AEnemyCharacter>(DamageCauser))
+		{
+			AttackerEnemy->Stun(ParryStunDuration);
+		}
+		else if (AHybridSpriteCharacter* AttackerChar = Cast<AHybridSpriteCharacter>(DamageCauser))
 				{
 					AttackerChar->SetCombatState(ECombatState::Stunned);
 					AttackerChar->GetWorldTimerManager().ClearTimer(AttackerChar->StunTimerHandle);
@@ -952,6 +989,11 @@ void AHybridSpriteCharacter::StartBlock()
 	{
 		const FVector ParryCenter = GetActorLocation() + GetActorForwardVector() * ParryDebugSphereForwardOffset;
 		DrawDebugSphere(GetWorld(), ParryCenter, ParryDebugSphereRadius, 16, FColor::Green, false, ParryWindow, 0, 2.0f);
+	}
+
+	if (BlockSoundAsset && GetWorld())
+	{
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), BlockSoundAsset, GetActorLocation());
 	}
 
 	// After parry window, parry is no longer possible

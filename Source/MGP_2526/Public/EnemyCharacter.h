@@ -8,6 +8,7 @@
 
 class AHybridSpriteCharacter;
 class UTextRenderComponent;
+class USoundBase;
 
 UENUM(BlueprintType)
 enum class EEnemyAIState : uint8
@@ -62,8 +63,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|AI")
 	float EnemyAttackRecoveryTime = 0.5f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Audio")
+	USoundBase* SlimeHitSoundAsset = nullptr;
+
 	float StateElapsed = 0.0f;
 	bool bDamageAppliedThisAttack = false;
+	bool bIsDead = false;
 
 	FTimerHandle StunTimerHandle;
 

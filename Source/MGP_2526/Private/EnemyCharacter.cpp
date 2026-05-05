@@ -10,6 +10,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 #include "TimerManager.h"
+#include "Sound/SoundBase.h"
 
 AEnemyCharacter::AEnemyCharacter()
 {
@@ -42,6 +43,12 @@ AEnemyCharacter::AEnemyCharacter()
 	{
 		HealthBarWidget->SetWidgetClass(HealthBarWidgetClass.Class);
 	}
+
+	static ConstructorHelpers::FObjectFinder<USoundBase> SlimeHitSoundObj(TEXT("/Game/SFX/SlimeHit"));
+	if (SlimeHitSoundObj.Succeeded())
+	{
+		SlimeHitSoundAsset = SlimeHitSoundObj.Object;
+	}
 }
 
 void AEnemyCharacter::BeginPlay()
@@ -61,6 +68,14 @@ void AEnemyCharacter::BeginPlay()
 void AEnemyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// Check if dead and destroy
+	if (CurrentHealth <= 0.0f && !bIsDead)
+	{
+		bIsDead = true;
+		Destroy();
+		return;
+	}
 
 	UpdateEnemyAI(DeltaTime);
 	UpdateStatusText();
@@ -227,6 +242,11 @@ void AEnemyCharacter::ApplyAttackDamage()
 
 	bDamageAppliedThisAttack = true;
 	UGameplayStatics::ApplyDamage(TargetPlayer, EnemyAttackDamage, GetController(), this, UDamageType::StaticClass());
+
+	if (SlimeHitSoundAsset && GetWorld())
+	{
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), SlimeHitSoundAsset, GetActorLocation());
+	}
 
 	if (GEngine)
 	{

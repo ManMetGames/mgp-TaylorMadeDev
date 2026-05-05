@@ -7,7 +7,7 @@
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Sound/SoundBase.h"
 
 ASlimeEnemy::ASlimeEnemy()
 {
@@ -49,6 +49,12 @@ ASlimeEnemy::ASlimeEnemy()
     if (AttackFrontObj.Succeeded())
     {
         SlimeAttackFrontFlipbook = AttackFrontObj.Object;
+    }
+
+    static ConstructorHelpers::FObjectFinder<USoundBase> SlimeHitSoundObj(TEXT("/Game/SFX/SlimeHit"));
+    if (SlimeHitSoundObj.Succeeded())
+    {
+        SlimeHitSoundAsset = SlimeHitSoundObj.Object;
     }
 }
 
