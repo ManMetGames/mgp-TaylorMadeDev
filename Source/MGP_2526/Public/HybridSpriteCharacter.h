@@ -363,7 +363,7 @@ protected:
 
 	// Multiplier applied to incoming damage while blocking (0.0 = full block, 1.0 = no block)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Defense")
-	float BlockDamageMultiplier = 0.35f;
+	float BlockDamageMultiplier = 0.25f;
 
 	UFUNCTION()
 	void RecoverFromStun();

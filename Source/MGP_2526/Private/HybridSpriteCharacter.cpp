@@ -204,6 +204,13 @@ void AHybridSpriteCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	if (bIsBlocking && bShowParryDebugSphere && GetWorld())
+	{
+		const FVector ParryCenter = GetActorLocation() + GetActorForwardVector() * ParryDebugSphereForwardOffset;
+		const FColor SphereColor = bCanParry ? FColor::Green : FColor::Blue;
+		DrawDebugSphere(GetWorld(), ParryCenter, ParryDebugSphereRadius, 16, SphereColor, false, 0.0f, 0, 2.0f);
+	}
+
 	UpdateCamera(DeltaTime);
 	UpdateAttackSwing(DeltaTime);
 	UpdateAnimation();
@@ -1020,15 +1027,6 @@ void AHybridSpriteCharacter::EndBlock()
 void AHybridSpriteCharacter::ClearParry()
 {
 	bCanParry = false;
-
-	// After the parry window ends, if we're still holding block, draw a blue sphere
-	// to indicate the blocking state (different color from the green parry window).
-	if (bIsBlocking && bShowParryDebugSphere && GetWorld())
-	{
-		const FVector ParryCenter = GetActorLocation() + GetActorForwardVector() * ParryDebugSphereForwardOffset;
-		// Draw a blue debug sphere for a short time to represent blocking state
-		DrawDebugSphere(GetWorld(), ParryCenter, ParryDebugSphereRadius, 16, FColor::Blue, false, 1.0f, 0, 2.0f);
-	}
 }
 
 void AHybridSpriteCharacter::ClearBlockCooldown()
